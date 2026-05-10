@@ -1,0 +1,6 @@
+Billing Plans
+
+Basic: Free, 100 req/min, 3 users max.
+Pro: $99/mo, 10,000 req/min, unlimited users, SSO included.
+Enterprise: Custom pricing, unlimited requests, dedicated support, SLA guarantee.
+Annual billing: 20% discount. Nonprofit: 30% discount.

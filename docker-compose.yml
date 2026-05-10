@@ -1,0 +1,13 @@
+services:
+  rag-assistant:
+    build: .
+    container_name: rag-assistant
+    volumes:
+      - faiss_data:/app/faiss_index
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    stdin_open: true
+    tty: true
+
+volumes:
+  faiss_data:

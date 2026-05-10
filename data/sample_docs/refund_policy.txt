@@ -1,0 +1,5 @@
+Refund Policy
+
+Enterprise customers: Full refund within 30 days. After 30 days, prorated refund.
+Pro plan: Full refund within 14 days. No refunds after.
+Basic plan: No refunds (free tier).

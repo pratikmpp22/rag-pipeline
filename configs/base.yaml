@@ -1,0 +1,67 @@
+llm:
+  model: "gemini-3.1-flash-lite"
+  temperature: 0
+
+embedding:
+  model: "models/gemini-embedding-001"
+
+chunking:
+  chunk_size: 512
+  chunk_overlap: 50
+  separators: ["\n\n", "\n", ". ", " "]
+
+vectorstore:
+  persist_directory: "./faiss_index"
+
+retrieval:
+  top_k: 20
+  top_n: 5
+  confidence_threshold: 0.3
+
+hybrid_search:
+  rrf_k: 60
+
+multi_query:
+  num_variants: 2
+
+memory:
+  max_turns: 10
+
+ingestion:
+  data_dir: "data/sample_docs/"
+
+evaluation:
+  pass_threshold: 0.85
+  needs_work_threshold: 0.70
+  test_questions:
+    - "What is the refund policy for enterprise customers?"
+    - "How do I reset my API key?"
+  ground_truths:
+    - "Enterprise customers get full refund within 30 days, prorated after."
+    - "Go to Settings > API Keys > Regenerate. Old key is invalidated immediately."
+
+features:
+  use_reranking: true
+  use_hybrid_search: true
+  use_multi_query: false
+  use_confidence_gating: false
+  use_self_check: true
+  use_security: true
+  use_memory: true
+  use_query_routing: true
+  use_streaming: true
+
+query_routing:
+  domains:
+    - name: "hr"
+      description: "onboarding, leave policy, team structure, employee benefits, HR"
+    - name: "support"
+      description: "refund policies, billing, pricing, account management, invoices"
+    - name: "technical"
+      description: "API, rate limits, authentication, security, encryption, certifications, SSO, versions, deprecation, sunset date"
+    - name: "product"
+      description: "features, integrations, upgrades, dashboard, mobile app"
+    - name: "greeting"
+      description: "general greetings, small talk, hello, hi, how are you"
+    - name: "none"
+      description: "unknown topics, unclear queries, or anything else"

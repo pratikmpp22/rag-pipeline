@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.git/
+faiss_index/
+.env
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/

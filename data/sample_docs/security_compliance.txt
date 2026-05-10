@@ -1,0 +1,6 @@
+Security and Compliance
+
+SSO: SAML 2.0 compatible. Tested with Okta, Azure AD, OneLogin.
+Certifications: SOC 2 Type II, ISO 27001, GDPR, HIPAA BAA available.
+Encryption: AES-256 at rest, TLS 1.3 in transit.
+Penetration testing: Annual third-party audit. Reports available on request.

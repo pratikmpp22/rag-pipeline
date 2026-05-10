@@ -1,0 +1,6 @@
+API Reference
+
+Authentication: Bearer token via API key in Authorization header.
+Rate limits: Pro 10,000 req/min (burst 15,000). Basic 100 req/min.
+Reset API key: Settings > API Keys > Regenerate. Old key invalidated immediately.
+Versioning: Current version v2. v1 deprecated, sunset date March 2026.

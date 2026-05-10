@@ -1,0 +1,7 @@
+Product Features
+
+Integrations: Slack, Jira, GitHub, Salesforce, Zapier, Google Workspace.
+Dashboard: Real-time analytics, custom reports, CSV and JSON export.
+Mobile app: iOS and Android. Offline mode with sync on reconnect.
+Collaboration: Shared workspaces, inline comments, version history, audit log.
+AI features: Smart summaries, auto-tagging, anomaly detection.
