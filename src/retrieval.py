@@ -101,6 +101,7 @@ def hybrid_retrieve(question, vectorstore, bm25_index, bm25_chunks, cfg, llm=Non
     """Orchestrate retrieval: dense+BM25 and RRF fusion using pre-computed routing/variants."""
     top_k = cfg["retrieval"]["top_k"]
     top_n = cfg["retrieval"]["top_n"]
+    fusion_top_n = cfg["retrieval"].get("fusion_top_n", 20)
     rrf_k = cfg["hybrid_search"]["rrf_k"]
 
     # 1. Fallback if not pre-computed
@@ -144,7 +145,7 @@ def hybrid_retrieve(question, vectorstore, bm25_index, bm25_chunks, cfg, llm=Non
         # Prepare docs for FlashRank
         passages = [
             {"id": i, "text": doc.page_content, "meta": doc.metadata}
-            for i, doc in enumerate(fused[:20]) # Rerank top 20 fused candidates
+            for i, doc in enumerate(fused[:fusion_top_n])
         ]
         
         rerank_request = RerankRequest(query=question, passages=passages)

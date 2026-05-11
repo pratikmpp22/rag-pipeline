@@ -1,75 +1,10 @@
-# Architecture
-
-## System Overview
-
-The RAG Expert Assistant implements a multi-stage retrieval and generation pipeline designed for grounded, citation-backed answers.
-
-## Pipeline Flow
-
-```
-User Query
-    │
-    ▼
-┌─────────────────┐
-│ Input Sanitizer  │  Prompt injection defense
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Query Router     │  Classifies into hr/technical/product domain
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Multi-Query      │  Generates N query variants (optional)
-│ Expansion        │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────────────────┐
-│         Hybrid Retrieval            │
-│  ┌──────────┐    ┌──────────────┐   │
-│  │  Dense    │    │   BM25       │   │
-│  │  Vector   │    │   Keyword    │   │
-│  │  Search   │    │   Search     │   │
-│  └─────┬─────┘    └──────┬──────┘   │
-│        │                 │          │
-│        └────────┬────────┘          │
-│                 ▼                   │
-│        ┌──────────────┐             │
-│        │  RRF Fusion  │             │
-│        └──────────────┘             │
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────┐
-│ Confidence Gate  │  Refuses if retrieval score < threshold
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ RAG Generation   │  LLM generates grounded answer with citations
-│ + Memory         │  Conversation history injected into prompt
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Self-Check       │  Verifies no unsupported claims
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ PII Filter       │  Redacts emails, phones, SSNs, credit cards
-└────────┬────────┘
-         │
-         ▼
-    Final Answer
-    + Source Citations
 # RAG Pipeline Architecture
 
-This document describes the end-to-end architecture of the RAG Expert Assistant, covering each stage from document ingestion through evaluation.
+This document describes the end-to-end architecture of the RAG Expert Assistant: document ingestion, hybrid retrieval with fusion and reranking, security controls, generation, and evaluation.
 
-## Pipeline Overview
+## Pipeline overview
+
+High-level flow from documents through retrieval, security, generation, and evaluation:
 
 ```
 Documents (PDF/MD/TXT)
@@ -78,22 +13,21 @@ Documents (PDF/MD/TXT)
 +----------------------------------------------+
 |  Ingestion Pipeline                           |
 |  Load -> Chunk (512 tokens, 50 overlap)       |
-|  -> Embed (gemini-embedding-exp-03-07)->FAISS |
+|  -> Embed (gemini-embedding-001) -> FAISS     |
 |  -> BM25 Index (Keyword Search)               |
 +----------------------------------------------+
     |
     v
 +--------------------------+  +---------------------+
 |  Retrieval + Fusion       |  |  Security Layer      |
-|  Dense Search (FAISS)     |  |  PII Detection       |
-|  Keyword Search (BM25)    |  |  Injection Defense   |
-|  -> RRF Fusion -> Top-20  |  |  Output Filtering    |
-|  -> FlashRank -> Top-5    |  +---------------------+
-+--------------------------+
+|  Dense @k=50 + BM25 @k=50 |  |  PII Detection       |
+|  -> RRF -> pool of 20     |  |  Injection Defense   |
+|  -> FlashRank -> Top-5    |  |  Output Filtering    |
++--------------------------+  +---------------------+
     |                                   |
     v                                   |
 +--------------------------+            |
-|  Generation (Gemini 3.1   |<----------+
+|  Generation (Gemini 3.1  |<----------+
 |  Flash)                   |
 |  Grounded prompt          |
 |  + Citation extraction    |
@@ -108,7 +42,80 @@ Documents (PDF/MD/TXT)
 +--------------------------+
 ```
 
-## Stage Details
+## Request path (runtime)
+
+Detailed stages from user query to final answer:
+
+```
+User Query
+    │
+    ▼
+┌──────────────────┐
+│ Input Sanitizer  │  Prompt injection defense: strips phrases like
+└────────┬─────────┘  "ignore previous instructions", "you are now …",
+         │            fake `system:` roles, and `<|…|>`-style markers
+         ▼            (regex removal before the LLM sees the query).
+┌──────────────────┐
+│ Query Router     │  Classifies into exactly one of: hr, support,
+└────────┬─────────┘  technical, product, greeting, or none (then
+         │            retrieval searches all domains).
+         ▼
+┌──────────────────┐
+│ Multi-Query      │  Generates N paraphrases of the question (same
+│ Expansion        │  intent, different wording) so dense and BM25
+└────────┬─────────┘  each see multiple surface forms—improving recall
+         │            when the original wording mismatches the corpus.
+         ▼
+┌──────────────────────────────────────┐
+│         Hybrid Retrieval             │
+│  ┌────────────┐    ┌──────────────┐  │
+│  │   Dense    │    │    BM25      │  │
+│  │  k=50      │    │    k=50      │  │
+│  └──────┬─────┘    └──────┬───────┘  │
+│         └────────┬────────┘          │
+│                  ▼                   │
+│         ┌────────────────┐           │
+│         │  RRF Fusion    │  merge ranks → take top 20 for reranking
+│         └────────┬───────┘           │
+│                  ▼                   │
+│         ┌────────────────┐           │
+│         │ FlashRank      │  cross-encoder rerank on those 20
+│         │ (top 5 out)    │           │
+│         └────────────────┘           │
+└──────────────────┬───────────────────┘
+                   ▼
+┌──────────────────┐
+│ Confidence Gate  │  Refuses if retrieval score < threshold (optional)
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│ RAG Generation   │  Grounded answer + citations; memory when enabled
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│ Self-Check       │  Verifies no unsupported claims (when enabled)
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│ PII Filter       │  Redacts emails, phones, SSNs, cards, name-like spans
+└────────┬─────────┘
+         ▼
+    Final Answer + Source Citations
+```
+
+### Retrieval widths (configured in `configs/base.yaml`)
+
+| Stage | Parameter | Default | Role |
+|-------|-----------|---------|------|
+| Dense (FAISS) | `retrieval.top_k` | 50 | Candidates per query variant from vector search. |
+| BM25 | same `top_k` | 50 | Candidates per query variant from keyword search. |
+| RRF merge | `hybrid_search.rrf_k` | 60 | Smoothing constant in `1 / (rrf_k + rank)` (not a hit count). |
+| After fusion | `retrieval.fusion_top_n` | 20 | Top fused documents passed to the reranker. |
+| After rerank | `retrieval.top_n` | 5 | Chunks sent to the generator. |
+
+RRF scores every distinct chunk that appeared in any dense or BM25 list; the reranker only scores the top `fusion_top_n` by that fused ordering so cross-encoder cost stays bounded while still combining both retrieval paths.
+
+## Stage details
 
 ### 1. Ingest
 
@@ -129,61 +136,56 @@ Documents are split into overlapping chunks using `RecursiveCharacterTextSplitte
   - `separators`: `["\n\n", "\n", ". ", " "]`
 - **Output**: List of chunked `Document` objects
 
-### 3. Embed & Index
+### 3. Embed and index
 
-Each chunk is embedded into vectors using Google's `gemini-embedding-exp-03-07` model. Embeddings are stored in FAISS for dense vector search, while a parallel BM25 index is built for keyword search.
+Each chunk is embedded using Google's embedding model from config. Embeddings are stored in FAISS for dense search, while a parallel BM25 index is built for keyword search.
 
 - **Entry point**: `src/ingestion.py :: build_vectorstore()`
-- **Model**: `gemini-embedding-exp-03-07`
+- **Model**: `configs/base.yaml` → `embedding.model` (e.g. `models/gemini-embedding-001`)
 - **Vector store**: FAISS (local filesystem) and BM25 (in-memory)
 - **Output**: Populated FAISS and BM25 indexes
 
-### 4. Retrieve & Fuse & Rerank (Hybrid Search + Cross-Encoder)
+### 4. Retrieve, fuse, and rerank (hybrid search)
 
-Given a user query, the system generates multi-query variants and executes parallel searches against FAISS (semantic) and BM25 (keyword). The results are fused using Reciprocal Rank Fusion (RRF) to get the best 20 candidates.
-Finally, a local Cross-Encoder model (`FlashRank`) evaluates the exact text of the query against the text of the 20 candidates to re-score and select the top 5 most relevant documents.
+For each query (original plus any multi-query variants), the pipeline runs dense and BM25 search at `top_k`, merges all ranked lists with reciprocal rank fusion, keeps the top `fusion_top_n` fused documents, reranks them with FlashRank when enabled, and returns the top `top_n` for generation.
 
 - **Entry point**: `src/retrieval.py :: hybrid_retrieve()`
-- **Search type**: Dense Cosine Similarity + BM25 Keyword Search
-- **Fusion**: RRF (Reciprocal Rank Fusion)
-- **Reranker**: FlashRank (`ms-marco-MiniLM-L-12-v2`)
-- **Output**: Top-5 reranked documents
+- **Search**: Dense similarity (FAISS) + BM25
+- **Fusion**: RRF across all per-query/per-modality lists
+- **Reranker**: FlashRank (`ms-marco-MiniLM-L-12-v2`) on the fused pool
+- **Output**: Top-`top_n` documents for the prompt
+
+Multi-query is controlled by `features.use_multi_query` in `configs/base.yaml`. When enabled, the LLM produces additional phrasings (`multi_query.num_variants`) so retrieval is less sensitive to a single wording.
 
 ### 5. Generate
 
-The LLM generates a grounded response using the retrieved context. The system prompt enforces citation rules, and context-only answering to minimize hallucination.
+The LLM generates a grounded response using the retrieved context. The system prompt enforces citation rules and context-only answering to reduce hallucination.
 
 - **Entry point**: `src/pipeline.py :: stream_query_pipeline()`
-- **Model**: `gemini-3.1-flash`
+- **Model**: from `configs/base.yaml` → `llm.model`
 - **Prompt strategy**: Grounded system prompt with `[Source N]` citation format
 - **Security**: Input sanitization before query, output PII filtering after generation
 - **Output**: Streamed answer with citations
 
 ### 6. Evaluate
 
-The RAGAS framework evaluates pipeline quality across four independent metrics, each isolating a different failure mode. An A/B comparison framework measures the impact of each optimization.
+The RAGAS framework evaluates pipeline quality across four metrics. An A/B comparison framework measures naive vs optimized settings.
 
-- **Entry points**:
-  - `src/evaluate.py` - RAGAS metrics
-  - `src/ab_comparison.py` - Naive vs Optimized
-- **Metrics**:
-  - **Faithfulness**: Does the answer stick to the retrieved context?
-  - **Answer Relevancy**: Does the answer address the question?
-  - **Context Precision**: Are retrieved chunks relevant to the question?
-  - **Context Recall**: Did retrieval find all relevant information?
+- **Entry points**: `src/evaluate.py`, `src/ab_comparison.py`
+- **Metrics**: Faithfulness, Answer Relevancy, Context Precision, Context Recall
 
-## Security Layer
+## Security layer
 
-The security module (`src/security/sanitizer.py`) provides defense-in-depth across the pipeline:
+The security module (`src/security/sanitizer.py`) provides defense in depth:
 
-1. **Input sanitization** (`sanitize_input`): Blocks known prompt injection patterns before they reach the LLM.
-2. **Output filtering** (`filter_output_pii`): Redacts any PII (Emails, Names, SSNs, Phones) that appears in LLM responses before returning to the user.
+1. **Input sanitization** (`sanitize_input`): Removes known prompt-injection patterns (instruction overrides, role hijacks, delimiter tricks) before the LLM runs.
+2. **Output filtering** (`filter_output_pii`): Redacts PII categories detected via regex (emails, phones, SSNs, credit-card-like spans, capitalized two-token name-like patterns).
 
-## Domain Routing
+## Domain routing
 
-The system includes an intelligent query router that classifies incoming questions into specific domains (`hr`, `technical`, `support`, `product`, `greeting`) to apply targeted metadata filters during retrieval.
+The query router classifies questions into one domain from `configs/base.yaml` → `query_routing.domains`: **hr**, **support**, **technical**, **product**, **greeting**, or **none**. Classification **none** or failure falls back to searching all domains. Document chunks may also carry a **general** domain from filename-based ingestion when no specific domain applies.
 
-## Project Layout
+## Project layout
 
 ```
 rag-expert-assistant/
@@ -191,7 +193,7 @@ rag-expert-assistant/
 ├── data/sample_docs/            # Source documents
 ├── src/
 │   ├── ingestion.py             # Load -> chunk -> embed -> index
-│   ├── retrieval.py             # Hybrid search, Multi-query, RRF fusion, Routing
+│   ├── retrieval.py             # Hybrid search, routing, RRF, multi-query, reranking
 │   ├── pipeline.py              # Full streaming RAG pipeline generator
 │   ├── memory.py                # Conversation history buffer
 │   ├── evaluate.py              # RAGAS evaluation metrics
@@ -201,7 +203,6 @@ rag-expert-assistant/
 │   └── security/
 │       └── sanitizer.py         # PII detection & prompt injection defense
 ├── docs/architecture.md         # This file
-├── .env.example                 # API key template
 ├── requirements.txt             # Dependencies
 └── README.md                    # Project overview
 ```

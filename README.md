@@ -21,9 +21,9 @@ Documents (PDF/MD/TXT)
     v
 +--------------------------+  +---------------------+
 |  Retrieval + Fusion       |  |  Security Layer      |
-|  Dense Search (FAISS)     |  |  PII Detection       |
-|  Keyword Search (BM25)    |  |  Injection Defense   |
-|  -> RRF Fusion -> Top-20  |  |  Output Filtering    |
+|  Dense Search k=50        |  |  PII Detection       |
+|  BM25 k=50                |  |  Injection Defense   |
+|  -> RRF -> pool 20        |  |  Output Filtering    |
 |  -> FlashRank -> Top-5    |  +---------------------+
 +--------------------------+
     |                                   |
@@ -89,10 +89,20 @@ uv pip install -r requirements.txt
 
 ### 2. Set API Key
 
+Create a `.env` file in the project root and add your Google API key (same directory as `README.md`):
+
 ```bash
-# Copy the example and add your Google API key
-cp .env.example .env
-# Edit .env with your key from https://aistudio.google.com/app/apikey
+# Windows (PowerShell): create .env and open in notepad
+notepad .env
+
+# Linux/Mac: create/edit .env
+# nano .env
+```
+
+Put the following in `.env` (use your key from [Google AI Studio](https://aistudio.google.com/app/apikey)):
+
+```env
+GOOGLE_API_KEY=your_key_here
 ```
 
 Only one API key needed - Google API key (free tier). No other keys required.
@@ -123,7 +133,7 @@ rag-expert-assistant/
 │   └── sample_docs/           # Sample documents for the RAG pipeline
 ├── src/
 │   ├── ingestion.py           # Full RAG: load -> chunk -> embed -> FAISS/BM25
-│   ├── retrieval.py           # Hybrid search, routing, RRF fusion, multi-query
+│   ├── retrieval.py           # Hybrid search, routing, RRF fusion, multi-query, reranking
 │   ├── pipeline.py            # Answer generation, streaming, gating, self-check
 │   ├── evaluate.py            # RAGAS evaluation (faithfulness, relevancy, precision, recall)
 │   ├── ab_comparison.py       # Naive vs Optimized RAG configuration comparison
@@ -133,7 +143,7 @@ rag-expert-assistant/
 │       └── sanitizer.py       # PII detection, prompt injection defense, output filtering
 ├── docs/
 │   └── architecture.md        # RAG pipeline architecture documentation
-├── .env.example               # API key template (Google only)
+├── .env                       # Google API key (create locally; do not commit)
 ├── requirements.txt           # Dependencies
 └── README.md                  # This file
 ```
@@ -161,3 +171,7 @@ rag-expert-assistant/
 | 3 | Add BM25 Hybrid Search & Fusion | 0.88 | 0.90 | +15% precision |
 | 4 | Add Query Routing & Multi-Query | 0.95 | 0.95 | +5% precision |
 | 5 | Grounded system prompt & Security | 0.98 | 0.99 | +3% faithfulness |
+
+## Architecture documentation
+
+For diagrams, per-stage behavior, retrieval widths (k for dense/BM25, fusion pool, reranking, final top-n), and security details, see **[`docs/architecture.md`](docs/architecture.md)** (RAG Pipeline Architecture).

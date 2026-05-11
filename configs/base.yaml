@@ -14,7 +14,11 @@ vectorstore:
   persist_directory: "./faiss_index"
 
 retrieval:
-  top_k: 20
+  # Per branch: dense (FAISS) and BM25 each return this many hits before fusion.
+  top_k: 50
+  # After RRF over those lists, this many fused candidates go to the cross-encoder reranker.
+  fusion_top_n: 20
+  # Final chunks passed to the generator after reranking (or top of fused list if reranking off).
   top_n: 5
   confidence_threshold: 0.3
 
