@@ -56,10 +56,10 @@ User Query
          │            fake `system:` roles, and `<|…|>`-style markers
          ▼            (regex removal before the LLM sees the query).
 ┌──────────────────┐
-│ Query Router     │  Labels: hr, support, technical, product,
-└────────┬─────────┘  greeting, none. Retrieval targets chunks in
-         │            the identified domain; for `none` the filter is
-         │            omitted so search spans every domain.
+│ Query Router     │  Steers search toward hr, support, technical,
+└────────┬─────────┘  or product via chunk metadata. Greetings get a
+         │            short direct reply without document retrieval.
+         │            Other questions use the full index when needed.
          ▼
 ┌──────────────────┐
 │ Multi-Query      │  Generates N paraphrases of the question (same
@@ -97,7 +97,6 @@ User Query
 │ Self-Check       │  If enabled: 2nd LLM call (YES/NO) whether the
 └────────┬─────────┘  answer states anything not supported by context;
          │            on YES, appends a warning (see stage details).
-         ▼
          ▼
 ┌──────────────────┐
 │ PII Filter       │  Redacts emails, phones, SSNs, cards, name-like spans
@@ -167,7 +166,7 @@ The LLM generates a grounded response using the retrieved context. The system pr
 - **Entry point**: `src/pipeline.py :: stream_query_pipeline()`
 - **Model**: from `configs/base.yaml` → `llm.model`
 - **Prompt strategy**: Grounded system prompt with `[Source N]` citation format
-- **Conversation memory**: The interactive CLI always constructs a `ConversationMemory` and passes it into the pipeline. Recent user and assistant turns (up to `memory.max_turns` pairs) are formatted into the system prompt’s `{history}` slot so follow-up questions stay coherent. There is no feature flag to turn memory off in the app; batch paths such as A/B evaluation call the pipeline **without** a memory object, so those runs are stateless.
+- **Conversation memory**: `ConversationMemory` (`src/memory.py`) keeps recent user and assistant messages and injects them into the system prompt’s `{history}` slot so follow-ups stay coherent. `memory.max_turns` in `configs/base.yaml` caps how many **back-and-forth rounds** are retained: each round is one user message plus one assistant reply. When a new turn would exceed that cap, the **oldest** user+assistant pair is dropped automatically (sliding window). This bounds prompt growth by **turn count**, not by tokenizer length; very long single messages are not truncated by this module.
 - **Security**: Input sanitization before query, output PII filtering after generation
 - **Output**: Streamed answer with citations
 
@@ -191,7 +190,13 @@ The security module (`src/security/sanitizer.py`) provides defense in depth:
 
 ## Domain routing
 
-The query router classifies each question into one label from `configs/base.yaml` → `query_routing.domains`: **hr**, **support**, **technical**, **product**, **greeting**, or **none**. For a concrete label other than **none**, hybrid retrieval applies a metadata filter so FAISS/BM25 prefer chunks tagged with that domain—narrowing the corpus to the most relevant slice. For **none** (or routing failure), no domain filter is applied and retrieval runs across all tagged domains. Document chunks may also carry a **general** domain from filename-based ingestion when no specific domain applies.
+Document chunks are tagged for retrieval scope with metadata domains **hr**, **support**, **technical**, and **product** (see `configs/base.yaml` → `query_routing.domains` descriptions used by the classifier in `src/retrieval.py`). When the router assigns one of these labels, hybrid retrieval applies a **domain filter** so dense and BM25 search focus on chunks tagged for that slice.
+
+**Greetings** (hello, small talk, etc.) are detected upstream of retrieval: the pipeline answers with a brief, polite reply **without** querying the vector index.
+
+For other user messages—when the question does not map cleanly to a single slice—the pipeline runs retrieval **without** a domain filter so the whole indexed corpus can surface. The model is still constrained to the retrieved passages; if they do not support an answer, it is instructed to respond along the lines of *not having enough information in the provided documents* rather than inventing facts.
+
+Chunks may also carry a **general** label from filename-based ingestion when no specific domain applies.
 
 ## Project layout
 

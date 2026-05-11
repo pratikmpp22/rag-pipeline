@@ -169,7 +169,7 @@ rag-expert-assistant/
 | Evaluation | RAGAS framework | Industry standard, separates retrieval vs generation quality |
 | Security | Regex PII + pattern blocking | Fast, no external deps, catches 90%+ of common threats |
 | Routing | LLM Domain Classification | Accurately maps queries to subset domains to reduce noise |
-| Memory | ConversationMemory (`memory.max_turns` in YAML) | Always on in the interactive CLI (injected into the system prompt); no toggle. Call sites that omit a memory object run stateless (e.g. A/B evaluation). |
+| Memory | ConversationMemory (`memory.max_turns` in YAML) | Recent dialogue is injected into the system prompt; older turns roll off when the configured round limit is exceeded. |
 | Generation | Gemini 3.1 Flash | Fast, cost-effective Gemini model for grounded RAG responses |
 
 ## Experiment Log
