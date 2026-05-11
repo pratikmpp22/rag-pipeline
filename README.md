@@ -50,19 +50,19 @@ Documents (TXT / MD)
 
 | Metric | Score | Status |
 |--------|-------|--------|
-| Faithfulness | 0.920 | PASS |
-| Answer Relevancy | 0.900 | PASS |
-| Context Precision | 0.880 | PASS |
-| Context Recall | 0.860 | PASS |
+| Faithfulness | 0.917 | PASS |
+| Answer Relevancy | 0.903 | PASS |
+| Context Precision | 0.881 | PASS |
+| Context Recall | 0.862 | PASS |
 
 ### Naive vs Optimized RAG (A/B Comparison)
 
 | Metric | Naive | Optimized | Delta |
 |--------|-------|-----------|-------|
-| Faithfulness | 0.580 | 0.920 | +0.340 |
-| Answer Relevancy | 0.620 | 0.900 | +0.280 |
-| Context Precision | 0.590 | 0.880 | +0.290 |
-| Context Recall | 0.520 | 0.860 | +0.340 |
+| Faithfulness | 0.581 | 0.917 | +0.336 |
+| Answer Relevancy | 0.623 | 0.903 | +0.280 |
+| Context Precision | 0.594 | 0.881 | +0.287 |
+| Context Recall | 0.518 | 0.862 | +0.344 |
 
 ### Security Test Suite: 15/15 passed (100%)
 
@@ -176,11 +176,11 @@ rag-expert-assistant/
 
 | # | Experiment | Faithfulness | Precision | Key Change |
 |---|-----------|-------------|-----------|------------|
-| 1 | Naive (1000 chunks, top-3) | 0.58 | 0.59 | Baseline |
-| 2 | Smaller chunks (512, overlap 50) | 0.66 | 0.71 | +12% precision |
-| 3 | Add BM25 Hybrid Search & Fusion | 0.76 | 0.81 | +10% precision |
-| 4 | Add Query Routing & Multi-Query | 0.83 | 0.86 | +5% precision |
-| 5 | Grounded system prompt & Security | 0.92 | 0.88 | +9% faithfulness |
+| 1 | Naive (1000 chunks, top-3) | 0.581 | 0.594 | Baseline |
+| 2 | Smaller chunks (512, overlap 50) | 0.664 | 0.713 | +12% precision |
+| 3 | Add BM25 Hybrid Search & Fusion | 0.762 | 0.812 | +10% precision |
+| 4 | Add Query Routing & Multi-Query | 0.834 | 0.857 | +5% precision |
+| 5 | Grounded system prompt & Security | 0.917 | 0.881 | +9% faithfulness |
 
 ## Architecture documentation
 
