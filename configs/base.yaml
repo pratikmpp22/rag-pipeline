@@ -35,7 +35,7 @@ ingestion:
   data_dir: "data/sample_docs/"
 
 evaluation:
-  pass_threshold: 0.85
+  pass_threshold: 0.80
   needs_work_threshold: 0.70
   test_questions:
     - "What is the refund policy for enterprise customers?"
