@@ -56,9 +56,10 @@ User Query
          │            fake `system:` roles, and `<|…|>`-style markers
          ▼            (regex removal before the LLM sees the query).
 ┌──────────────────┐
-│ Query Router     │  Classifies into exactly one of: hr, support,
-└────────┬─────────┘  technical, product, greeting, or none (then
-         │            retrieval searches all domains).
+│ Query Router     │  Labels: hr, support, technical, product,
+└────────┬─────────┘  greeting, none. Retrieval targets chunks in
+         │            the identified domain; for `none` the filter is
+         │            omitted so search spans every domain.
          ▼
 ┌──────────────────┐
 │ Multi-Query      │  Generates N paraphrases of the question (same
@@ -89,12 +90,14 @@ User Query
 └────────┬─────────┘
          ▼
 ┌──────────────────┐
-│ RAG Generation   │  Grounded answer + citations; memory when enabled
-└────────┬─────────┘
+│ RAG Generation   │  Grounded answer + citations; prior turns from
+└────────┬─────────┘  ConversationMemory (see `memory.max_turns`).
          ▼
 ┌──────────────────┐
-│ Self-Check       │  Verifies no unsupported claims (when enabled)
-└────────┬─────────┘
+│ Self-Check       │  If enabled: 2nd LLM call (YES/NO) whether the
+└────────┬─────────┘  answer states anything not supported by context;
+         │            on YES, appends a warning (see stage details).
+         ▼
          ▼
 ┌──────────────────┐
 │ PII Filter       │  Redacts emails, phones, SSNs, cards, name-like spans
@@ -164,8 +167,13 @@ The LLM generates a grounded response using the retrieved context. The system pr
 - **Entry point**: `src/pipeline.py :: stream_query_pipeline()`
 - **Model**: from `configs/base.yaml` → `llm.model`
 - **Prompt strategy**: Grounded system prompt with `[Source N]` citation format
+- **Conversation memory**: The interactive CLI always constructs a `ConversationMemory` and passes it into the pipeline. Recent user and assistant turns (up to `memory.max_turns` pairs) are formatted into the system prompt’s `{history}` slot so follow-up questions stay coherent. There is no feature flag to turn memory off in the app; batch paths such as A/B evaluation call the pipeline **without** a memory object, so those runs are stateless.
 - **Security**: Input sanitization before query, output PII filtering after generation
 - **Output**: Streamed answer with citations
+
+### 5b. Self-check (optional guard)
+
+When `features.use_self_check` is true in `configs/base.yaml`, after the main answer is produced `run_self_check` in `src/pipeline.py` issues a **second** call to the same chat LLM. The prompt is a short binary check: does the answer contain any claim **not** supported by the retrieved context string? The model must reply with YES or NO only. If the response contains `YES`, a fixed warning line is appended to the answer so the user knows some statements might not be fully grounded. This is a lightweight heuristic, not a full claim-by-claim audit.
 
 ### 6. Evaluate
 
@@ -183,7 +191,7 @@ The security module (`src/security/sanitizer.py`) provides defense in depth:
 
 ## Domain routing
 
-The query router classifies questions into one domain from `configs/base.yaml` → `query_routing.domains`: **hr**, **support**, **technical**, **product**, **greeting**, or **none**. Classification **none** or failure falls back to searching all domains. Document chunks may also carry a **general** domain from filename-based ingestion when no specific domain applies.
+The query router classifies each question into one label from `configs/base.yaml` → `query_routing.domains`: **hr**, **support**, **technical**, **product**, **greeting**, or **none**. For a concrete label other than **none**, hybrid retrieval applies a metadata filter so FAISS/BM25 prefer chunks tagged with that domain—narrowing the corpus to the most relevant slice. For **none** (or routing failure), no domain filter is applied and retrieval runs across all tagged domains. Document chunks may also carry a **general** domain from filename-based ingestion when no specific domain applies.
 
 ## Project layout
 

@@ -23,7 +23,7 @@ def test_all_feature_flags_present(cfg):
     expected_flags = [
         "use_reranking", "use_hybrid_search", "use_multi_query",
         "use_confidence_gating", "use_self_check", "use_security",
-        "use_memory", "use_query_routing", "use_streaming",
+        "use_query_routing", "use_streaming",
     ]
     for flag in expected_flags:
         assert flag in cfg["features"], f"Missing feature flag: {flag}"

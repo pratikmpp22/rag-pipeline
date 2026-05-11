@@ -118,7 +118,7 @@ def query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
 
     # 5. Get history
     history = ""
-    if cfg["features"]["use_memory"] and memory:
+    if memory:
         history = memory.format_for_prompt()
 
     # 6. Generate answer
@@ -137,7 +137,7 @@ def query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
         answer = filter_output_pii(answer)
 
     # 9. Update memory
-    if cfg["features"]["use_memory"] and memory:
+    if memory:
         memory.add_turn("user", question)
         memory.add_turn("assistant", answer)
 
@@ -196,7 +196,7 @@ def stream_query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
             yield {"type": "token", "content": chunk}
         yield {"type": "stage", "name": "Generating answer", "status": "done"}
         
-        if cfg["features"]["use_memory"] and memory:
+        if memory:
             memory.add_turn("user", question)
             memory.add_turn("assistant", full_answer)
             
@@ -236,7 +236,7 @@ def stream_query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
 
     # 5. Get history
     history = ""
-    if cfg["features"]["use_memory"] and memory:
+    if memory:
         history = memory.format_for_prompt()
 
     # 6. Stream answer tokens
@@ -264,7 +264,7 @@ def stream_query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
         yield {"type": "stage", "name": "Filtering PII", "status": "done"}
 
     # 9. Update memory
-    if cfg["features"]["use_memory"] and memory:
+    if memory:
         memory.add_turn("user", question)
         memory.add_turn("assistant", full_answer)
 

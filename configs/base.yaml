@@ -51,7 +51,6 @@ features:
   use_confidence_gating: false
   use_self_check: true
   use_security: true
-  use_memory: true
   use_query_routing: true
   use_streaming: true
 

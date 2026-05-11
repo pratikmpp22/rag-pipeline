@@ -18,12 +18,12 @@ def sample_docs():
 
 @pytest.fixture
 def base_cfg():
+    # Conversation memory is not toggled via config; tests pass memory=None.
     return {
         "features": {
             "use_confidence_gating": True,
             "use_self_check": True,
             "use_security": True,
-            "use_memory": True,
             "use_reranking": True,
             "use_hybrid_search": True,
             "use_multi_query": False,

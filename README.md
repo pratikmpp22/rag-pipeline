@@ -89,8 +89,6 @@ uv pip install -r requirements.txt
 
 ### 2. Set API Key
 
-Create a `.env` file in the project root and add your Google API key (same directory as `README.md`):
-
 ```bash
 # Windows (PowerShell): create .env and open in notepad
 notepad .env
@@ -122,6 +120,17 @@ python -m src.evaluate
 # Run A/B comparison (naive vs optimized)
 python -m src.ab_comparison
 ```
+
+### 4. Docker
+
+From the project root (where `docker-compose.yml` lives), put `GOOGLE_API_KEY` in a `.env` file next to that compose file—Compose substitutes it into the container environment automatically.
+
+```bash
+docker compose build
+docker compose run --rm rag-assistant
+```
+
+The service uses interactive stdin/TTY so you get the same terminal CLI as local Python. A named volume (`faiss_data`) keeps the FAISS index under `/app/faiss_index` across container runs.
 
 ## Project Structure
 
@@ -160,6 +169,7 @@ rag-expert-assistant/
 | Evaluation | RAGAS framework | Industry standard, separates retrieval vs generation quality |
 | Security | Regex PII + pattern blocking | Fast, no external deps, catches 90%+ of common threats |
 | Routing | LLM Domain Classification | Accurately maps queries to subset domains to reduce noise |
+| Memory | ConversationMemory (`memory.max_turns` in YAML) | Always on in the interactive CLI (injected into the system prompt); no toggle. Call sites that omit a memory object run stateless (e.g. A/B evaluation). |
 | Generation | Gemini 3.1 Flash | Fast, cost-effective Gemini model for grounded RAG responses |
 
 ## Experiment Log

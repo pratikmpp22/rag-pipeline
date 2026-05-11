@@ -71,7 +71,6 @@ def _build_pipeline(config, cfg):
             "use_confidence_gating": False,
             "use_self_check": False,
             "use_security": False,
-            "use_memory": False,
         },
     }
 

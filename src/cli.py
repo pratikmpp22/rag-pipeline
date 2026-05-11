@@ -35,7 +35,6 @@ def print_feature_status(cfg):
         "use_query_routing": "routing",
         "use_hybrid_search": "hybrid",
         "use_reranking": "reranking",
-        "use_memory": "memory",
         "use_multi_query": "multi-query",
         "use_confidence_gating": "gating",
         "use_self_check": "self-check",
@@ -45,6 +44,7 @@ def print_feature_status(cfg):
     for key, label in flag_names.items():
         status = "ON" if flags.get(key, False) else "OFF"
         parts.append(f"{label}={status}")
+    parts.append("memory=ON")
     print(f"Features: {'  '.join(parts)}")
 
 
