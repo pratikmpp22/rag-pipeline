@@ -163,14 +163,14 @@ rag-expert-assistant/
 |----------|--------|-----|
 | Vector store | FAISS | Fast, local execution, works well in-memory |
 | Hybrid Search| BM25 | Provides pure keyword matching to complement dense embeddings |
-| Embeddings | `models/gemini-embedding-001` (see `base.yaml`) | Google Generative AI embeddings for FAISS |
+| Embeddings | gemini-embedding-001 | Free tier in Gemini API, 768 dims |
 | Chunking | 512 chars, 50 overlap | Preserves context at sentence boundaries |
 | Reranking | FlashRank Cross-Encoder | Re-scores the mathematically fused RRF results with a local neural network for ultimate precision |
 | Evaluation | RAGAS framework | Industry standard, separates retrieval vs generation quality |
 | Security | Regex PII + pattern blocking | Fast, no external deps, catches 90%+ of common threats |
 | Routing | LLM Domain Classification | Accurately maps queries to subset domains to reduce noise |
 | Memory | ConversationMemory (`memory.max_turns` in YAML) | Recent dialogue is injected into the system prompt; older turns roll off when the configured round limit is exceeded. |
-| Generation | Gemini via `llm.model` in `base.yaml` (default: flash-lite) | Model name is config-driven for grounded RAG responses |
+| Generation | Gemini 3.1 Flash | Fast, cost-effective Gemini model for grounded RAG responses |
 
 ## Experiment Log
 
