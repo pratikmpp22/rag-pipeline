@@ -132,9 +132,17 @@ def hybrid_retrieve(question, vectorstore, bm25_index, bm25_chunks, cfg, llm=Non
 
         all_ranked_lists.append(dense_results)
 
-        # BM25 search
+        # BM25 search (over-fetch then filter by domain so hybrid matches FAISS scope)
         if cfg["features"]["use_hybrid_search"]:
-            bm25_results = bm25_search(bm25_index, bm25_chunks, q, k=top_k)
+            bm25_cap = min(len(bm25_chunks), top_k * 20 if domain_filter else top_k)
+            bm25_results = bm25_search(bm25_index, bm25_chunks, q, k=bm25_cap)
+            if domain_filter:
+                dom = domain_filter.get("domain")
+                bm25_results = [
+                    d for d in bm25_results if d.metadata.get("domain") == dom
+                ][:top_k]
+            else:
+                bm25_results = bm25_results[:top_k]
             all_ranked_lists.append(bm25_results)
 
     # 4. RRF fusion

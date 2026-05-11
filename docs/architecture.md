@@ -7,13 +7,13 @@ This document describes the end-to-end architecture of the RAG Expert Assistant:
 High-level flow from documents through retrieval, security, generation, and evaluation:
 
 ```
-Documents (PDF/MD/TXT)
+Documents (TXT / MD)
     |
     v
 +----------------------------------------------+
 |  Ingestion Pipeline                           |
-|  Load -> Chunk (512 tokens, 50 overlap)       |
-|  -> Embed (gemini-embedding-001) -> FAISS     |
+|  Load -> Chunk (512 chars, 50 overlap)        |
+|  -> Embed (see base.yaml) -> FAISS           |
 |  -> BM25 Index (Keyword Search)               |
 +----------------------------------------------+
     |
@@ -27,8 +27,8 @@ Documents (PDF/MD/TXT)
     |                                   |
     v                                   |
 +--------------------------+            |
-|  Generation (Gemini 3.1  |<----------+
-|  Flash)                   |
+|  Generation (LLM from    |<----------+
+|  config)                  |
 |  Grounded prompt          |
 |  + Citation extraction    |
 +--------------------------+
@@ -62,10 +62,9 @@ User Query
          │            Other questions use the full index when needed.
          ▼
 ┌──────────────────┐
-│ Multi-Query      │  Generates N paraphrases of the question (same
-│ Expansion        │  intent, different wording) so dense and BM25
-└────────┬─────────┘  each see multiple surface forms—improving recall
-         │            when the original wording mismatches the corpus.
+│ Multi-Query      │  When `use_multi_query` is on: N paraphrases of the
+│ Expansion        │  question so dense and BM25 see multiple surface
+└────────┬─────────┘  forms (default config: single-query path).
          ▼
 ┌──────────────────────────────────────┐
 │         Hybrid Retrieval             │
@@ -190,7 +189,7 @@ The security module (`src/security/sanitizer.py`) provides defense in depth:
 
 ## Domain routing
 
-Document chunks are tagged for retrieval scope with metadata domains **hr**, **support**, **technical**, and **product** (see `configs/base.yaml` → `query_routing.domains` descriptions used by the classifier in `src/retrieval.py`). When the router assigns one of these labels, hybrid retrieval applies a **domain filter** so dense and BM25 search focus on chunks tagged for that slice.
+Document chunks carry a `domain` tag set at ingest time (`src/ingestion.py` → `DOMAIN_MAP`, defaulting to **general**). Those tags should align with router labels **hr**, **support**, **technical**, and **product** in `configs/base.yaml` so filters return results. When the router assigns one of these labels, **FAISS** uses LangChain’s metadata filter on that field; **BM25** ranks a wider candidate set then keeps up to `top_k` hits whose `domain` metadata matches, so both branches respect the same slice before RRF.
 
 **Greetings** (hello, small talk, etc.) are detected upstream of retrieval: the pipeline answers with a brief, polite reply **without** querying the vector index.
 

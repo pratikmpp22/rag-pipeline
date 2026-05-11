@@ -8,8 +8,8 @@ from langchain_community.vectorstores import FAISS
 
 # Filename stem → domain mapping
 DOMAIN_MAP = {
-    "refund_policy": "hr",
-    "billing_plans": "hr",
+    "refund_policy": "support",
+    "billing_plans": "support",
     "hr_onboarding": "hr",
     "api_reference": "technical",
     "security_compliance": "technical",
