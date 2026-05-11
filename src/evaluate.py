@@ -2,7 +2,10 @@ import pandas as pd
 from datasets import Dataset
 
 from ragas import evaluate
-from ragas.metrics.collections import faithfulness, answer_relevancy, context_precision, context_recall
+from ragas.metrics._answer_relevance import answer_relevancy
+from ragas.metrics._context_precision import context_precision
+from ragas.metrics._context_recall import context_recall
+from ragas.metrics._faithfulness import faithfulness
 from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
