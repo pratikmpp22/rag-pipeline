@@ -21,6 +21,7 @@ retrieval:
   # Final chunks passed to the generator after reranking (or top of fused list if reranking off).
   top_n: 5
   confidence_threshold: 0.3
+  rrf_confidence_threshold: 0.01
 
 hybrid_search:
   rrf_k: 60
@@ -29,7 +30,7 @@ multi_query:
   num_variants: 2
 
 memory:
-  max_turns: 10
+  token_budget: 2000
 
 ingestion:
   data_dir: "data/sample_docs/"

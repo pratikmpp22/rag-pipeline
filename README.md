@@ -28,20 +28,17 @@ Documents (TXT / MD)
 +--------------------------+
     |                                   |
     v                                   |
-+--------------------------+            |
-|  Generation (LLM from     |<----------+
-|  config, e.g. Flash-Lite) |
-|  Grounded prompt          |
-|  + Citation extraction    |
-+--------------------------+
-    |
-    v
-+--------------------------+
-|  Evaluation (RAGAS)       |
-|  Faithfulness | Relevancy |
-|  Precision | Recall       |
-|  A/B: Naive vs Optimized  |
-+--------------------------+
++-----------------------------------+   |
+|  Unified Pipeline Core Generator  |<--+
+|  (Grounded prompt, hybrid memory, |
+|   citation extraction)            |
++-----------------------------------+
+    |                   |
+    v                   v
++---------------+  +-------------+
+| Streamlit UI  |  | Terminal UI |
+| (app.py)      |  | (cli.py)    |
++---------------+  +-------------+
 ```
 
 ## Results
@@ -108,8 +105,15 @@ Only one API key needed - Google API key (free tier). No other keys required.
 ### 3. Run
 
 ```bash
-# Run the full interactive RAG Assistant CLI
+# Run the Interactive Streamlit Web UI (Primary)
+streamlit run app.py
+
+# Or run via Docker Compose
+docker-compose up --build
+
+# Or run the Terminal CLI
 python -m src
+
 
 # Run the Data Ingestion (Force Vector DB rebuild)
 python -m src.ingestion
@@ -126,11 +130,10 @@ python -m src.ab_comparison
 From the project root (where `docker-compose.yml` lives), put `GOOGLE_API_KEY` in a `.env` file next to that compose file—Compose substitutes it into the container environment automatically.
 
 ```bash
-docker compose build
-docker compose run --rm rag-assistant
+docker compose up --build
 ```
 
-The service uses interactive stdin/TTY so you get the same terminal CLI as local Python. A named volume (`faiss_data`) keeps the FAISS index under `/app/faiss_index` across container runs.
+The service launches the Streamlit UI on port `8501`. Open `http://localhost:8501` in your browser. A named volume (`faiss_data`) keeps the FAISS index under `/app/faiss_index` across container restarts.
 
 ## Project Structure
 
@@ -143,7 +146,9 @@ rag-expert-assistant/
 ├── src/
 │   ├── ingestion.py           # Full RAG: load -> chunk -> embed -> FAISS/BM25
 │   ├── retrieval.py           # Hybrid search, routing, RRF fusion, multi-query, reranking
-│   ├── pipeline.py            # Answer generation, streaming, gating, self-check
+│   ├── pipeline.py            # Unified answer generation, streaming, gating, self-check
+│   ├── memory.py              # HybridMemory with token budget and LLM summarization
+│   ├── config.py              # Safe, reloadable, path-keyed configuration caching
 │   ├── evaluate.py            # RAGAS evaluation (faithfulness, relevancy, precision, recall)
 │   ├── ab_comparison.py       # Naive vs Optimized RAG configuration comparison
 │   ├── cli.py                 # Interactive Terminal Interface
@@ -152,6 +157,13 @@ rag-expert-assistant/
 │       └── sanitizer.py       # PII detection, prompt injection defense, output filtering
 ├── docs/
 │   └── architecture.md        # RAG pipeline architecture documentation
+├── .streamlit/
+│   └── config.toml            # Streamlit configurations (e.g. file watcher overrides)
+├── app.py                     # Streamlit Application Entry Point
+├── Dockerfile                 # Docker image configuration for Streamlit app
+├── docker-compose.yml         # Compose stack with persistent FAISS volume
+├── .dockerignore              # Excluded files for docker build context
+├── .gitignore                 # Git ignore file
 ├── .env                       # Google API key (create locally; do not commit)
 ├── requirements.txt           # Dependencies
 └── README.md                  # This file
@@ -162,6 +174,7 @@ rag-expert-assistant/
 | Decision | Choice | Why |
 |----------|--------|-----|
 | Vector store | FAISS | Fast, local execution, works well in-memory |
+| UI Framework | Streamlit | Rapid reactive frontend with dynamic sidebar feature flags and a native Pipeline Stages transparency expander |
 | Hybrid Search| BM25 | Provides pure keyword matching to complement dense embeddings |
 | Embeddings | gemini-embedding-001 | Free tier in Gemini API, 768 dims |
 | Chunking | 512 chars, 50 overlap | Preserves context at sentence boundaries |
@@ -169,7 +182,7 @@ rag-expert-assistant/
 | Evaluation | RAGAS framework | Industry standard, separates retrieval vs generation quality |
 | Security | Regex PII + pattern blocking | Fast, no external deps, catches 90%+ of common threats |
 | Routing | LLM Domain Classification | Accurately maps queries to subset domains to reduce noise |
-| Memory | ConversationMemory (`memory.max_turns` in YAML) | Recent dialogue is injected into the system prompt; older turns roll off when the configured round limit is exceeded. |
+| Memory | HybridMemory (`memory.token_budget`) | Tracks token usage; summarizes older turns dynamically to prevent context overflow while preserving fidelity of recent exchanges |
 | Generation | Gemini 3.1 Flash | Fast, cost-effective Gemini model for grounded RAG responses |
 
 ## Experiment Log

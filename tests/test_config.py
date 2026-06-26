@@ -29,7 +29,8 @@ def test_all_feature_flags_present(cfg):
         assert flag in cfg["features"], f"Missing feature flag: {flag}"
 
 
-def test_get_config_is_singleton():
+def test_get_config_returns_copy():
     c1 = get_config()
     c2 = get_config()
-    assert c1 is c2
+    assert c1 == c2
+    assert c1 is not c2

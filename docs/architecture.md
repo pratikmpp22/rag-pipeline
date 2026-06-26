@@ -26,25 +26,21 @@ Documents (TXT / MD)
 +--------------------------+  +---------------------+
     |                                   |
     v                                   |
-+--------------------------+            |
-|  Generation (LLM from    |<----------+
-|  config)                  |
-|  Grounded prompt          |
-|  + Citation extraction    |
-+--------------------------+
-    |
-    v
-+--------------------------+
-|  Evaluation (RAGAS)       |
-|  Faithfulness | Relevancy |
-|  Precision | Recall       |
-|  A/B: Naive vs Optimized  |
-+--------------------------+
-```
++-----------------------------------+   |
+|  Unified Pipeline Core Generator  |<--+
+|  (Grounded prompt, hybrid memory, |
+|   citation extraction)            |
++-----------------------------------+
+    |                   |
+    v                   v
++---------------+  +-------------+
+| Streamlit UI  |  | Terminal UI |
+| (app.py)      |  | (cli.py)    |
++---------------+  +-------------+
 
 ## Request path (runtime)
 
-Detailed stages from user query to final answer:
+Detailed stages from user query to final answer. The Streamlit UI actively listens to these stages and surfaces them in real-time under a "🔍 Pipeline Stages" expander, detailing sanitization blocks, routing decisions, multi-query expansions, and exact chunk counts retrieved by FAISS vs BM25.
 
 ```
 User Query
@@ -85,12 +81,12 @@ User Query
 └──────────────────┬───────────────────┘
                    ▼
 ┌──────────────────┐
-│ Confidence Gate  │  Refuses if retrieval score < threshold (optional)
-└────────┬─────────┘
-         ▼
+│ Confidence Gate  │  Refuses if retrieval score < threshold. Dual thresholds
+└────────┬─────────┘  exist: `confidence_threshold` (0.3) for reranking and
+         ▼            `rrf_confidence_threshold` (0.01) for RRF.
 ┌──────────────────┐
 │ RAG Generation   │  Grounded answer + citations; prior turns from
-└────────┬─────────┘  ConversationMemory (see `memory.max_turns`).
+└────────┬─────────┘  HybridMemory (managed via `memory.token_budget`).
          ▼
 ┌──────────────────┐
 │ Self-Check       │  If enabled: 2nd LLM call (YES/NO) whether the
@@ -98,8 +94,8 @@ User Query
          │            on YES, appends a warning (see stage details).
          ▼
 ┌──────────────────┐
-│ PII Filter       │  Redacts emails, phones, SSNs, cards, name-like spans
-└────────┬─────────┘
+│ PII Filter       │  Redacts emails, phones, SSNs, cards (if security=ON).
+└────────┬─────────┘  Note: Streams are buffered when this is active.
          ▼
     Final Answer + Source Citations
 ```
@@ -165,7 +161,7 @@ The LLM generates a grounded response using the retrieved context. The system pr
 - **Entry point**: `src/pipeline.py :: stream_query_pipeline()`
 - **Model**: from `configs/base.yaml` → `llm.model`
 - **Prompt strategy**: Grounded system prompt with `[Source N]` citation format
-- **Conversation memory**: `ConversationMemory` (`src/memory.py`) keeps recent user and assistant messages and injects them into the system prompt’s `{history}` slot so follow-ups stay coherent. `memory.max_turns` in `configs/base.yaml` caps how many **back-and-forth rounds** are retained: each round is one user message plus one assistant reply. When a new turn would exceed that cap, the **oldest** user+assistant pair is dropped automatically (sliding window). This bounds prompt growth by **turn count**, not by tokenizer length; very long single messages are not truncated by this module.
+- **Conversation memory**: `HybridMemory` (`src/memory.py`) keeps recent user and assistant messages and injects them into the system prompt’s `{history}` slot so follow-ups stay coherent. `memory.token_budget` in `configs/base.yaml` caps how many tokens the history can consume. When a new turn would exceed that cap, the **oldest** user+assistant pair is automatically dropped from the verbatim history and dynamically summarized by an LLM into a running summary. This bounds prompt growth intelligently while preserving critical context indefinitely.
 - **Security**: Input sanitization before query, output PII filtering after generation
 - **Output**: Streamed answer with citations
 
@@ -185,17 +181,16 @@ The RAGAS framework evaluates pipeline quality across four metrics. An A/B compa
 The security module (`src/security/sanitizer.py`) provides defense in depth:
 
 1. **Input sanitization** (`sanitize_input`): Removes known prompt-injection patterns (instruction overrides, role hijacks, delimiter tricks) before the LLM runs.
-2. **Output filtering** (`filter_output_pii`): Redacts PII categories detected via regex (emails, phones, SSNs, credit-card-like spans, capitalized two-token name-like patterns).
+2. **Output filtering** (`filter_output_pii`): Redacts PII categories detected via regex (emails, phones, SSNs, credit-card-like spans). Note: Name detection is explicitly ignored to prevent false positives in the output filter.
 
 ## Domain routing
 
-Document chunks carry a `domain` tag set at ingest time (`src/ingestion.py` → `DOMAIN_MAP`, defaulting to **general**). Those tags should align with router labels **hr**, **support**, **technical**, and **product** in `configs/base.yaml` so filters return results. When the router assigns one of these labels, **FAISS** uses LangChain’s metadata filter on that field; **BM25** ranks a wider candidate set then keeps up to `top_k` hits whose `domain` metadata matches, so both branches respect the same slice before RRF.
+Document chunks carry a `domain` tag set at ingest time (`src/ingestion.py` → `DOMAIN_MAP`, defaulting to **none**). Those tags should align with router labels **hr**, **support**, **technical**, and **product** in `configs/base.yaml` so filters return results. When the router assigns one of these labels, **FAISS** uses LangChain's metadata filter on that field; **BM25** ranks a wider candidate set then keeps up to `top_k` hits whose `domain` metadata matches, so both branches respect the same slice before RRF.
 
 **Greetings** (hello, small talk, etc.) are detected upstream of retrieval: the pipeline answers with a brief, polite reply **without** querying the vector index.
 
 For other user messages—when the question does not map cleanly to a single slice—the pipeline runs retrieval **without** a domain filter so the whole indexed corpus can surface. The model is still constrained to the retrieved passages; if they do not support an answer, it is instructed to respond along the lines of *not having enough information in the provided documents* rather than inventing facts.
 
-Chunks may also carry a **general** label from filename-based ingestion when no specific domain applies.
 
 ## Project layout
 
@@ -214,6 +209,11 @@ rag-expert-assistant/
 │   ├── __main__.py              # Entry point
 │   └── security/
 │       └── sanitizer.py         # PII detection & prompt injection defense
+├── app.py                       # Streamlit Application Entry Point
+├── Dockerfile                   # Docker image configuration for Streamlit app
+├── docker-compose.yml           # Compose stack with persistent FAISS volume
+├── .dockerignore                # Excluded files for docker build context
+├── .gitignore                   # Git ignore file
 ├── docs/architecture.md         # This file
 ├── requirements.txt             # Dependencies
 └── README.md                    # Project overview

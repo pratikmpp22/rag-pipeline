@@ -2,7 +2,7 @@ from collections import defaultdict
 
 from rank_bm25 import BM25Okapi
 from langchain_core.documents import Document
-from pydantic import BaseModel, Field
+
 
 try:
     from flashrank import Ranker, RerankRequest
@@ -97,27 +97,20 @@ def classify_domain(question, llm, cfg):
     return None  # Search all domains on failure or if domain is 'none'
 
 
-def hybrid_retrieve(question, vectorstore, bm25_index, bm25_chunks, cfg, llm=None, domain_filter=None, queries=None):
+def hybrid_retrieve(question, vectorstore, bm25_index, bm25_chunks, cfg, domain_filter=None, queries=None, stats_dict=None):
     """Orchestrate retrieval: dense+BM25 and RRF fusion using pre-computed routing/variants."""
     top_k = cfg["retrieval"]["top_k"]
     top_n = cfg["retrieval"]["top_n"]
     fusion_top_n = cfg["retrieval"].get("fusion_top_n", 20)
     rrf_k = cfg["hybrid_search"]["rrf_k"]
 
-    # 1. Fallback if not pre-computed
-    if not domain_filter and cfg["features"]["use_query_routing"] and llm:
-        domain = classify_domain(question, llm, cfg)
-        if domain:
-            domain_filter = {"domain": domain}
-
     if not queries:
-        if cfg["features"]["use_multi_query"] and llm:
-            queries = generate_query_variants(question, llm, n=cfg["multi_query"]["num_variants"])
-        else:
-            queries = [question]
+        queries = [question]
 
     # 3. Retrieve from both indexes for each query
     all_ranked_lists = []
+    total_dense = 0
+    total_bm25 = 0
 
     for q in queries:
         # Dense vector search
@@ -131,6 +124,7 @@ def hybrid_retrieve(question, vectorstore, bm25_index, bm25_chunks, cfg, llm=Non
             dense_results = vectorstore.similarity_search(q, k=top_k)
 
         all_ranked_lists.append(dense_results)
+        total_dense += len(dense_results)
 
         # BM25 search (over-fetch then filter by domain so hybrid matches FAISS scope)
         if cfg["features"]["use_hybrid_search"]:
@@ -144,9 +138,15 @@ def hybrid_retrieve(question, vectorstore, bm25_index, bm25_chunks, cfg, llm=Non
             else:
                 bm25_results = bm25_results[:top_k]
             all_ranked_lists.append(bm25_results)
+            total_bm25 += len(bm25_results)
 
     # 4. RRF fusion
     fused = reciprocal_rank_fusion(all_ranked_lists, rrf_k=rrf_k)
+    
+    if stats_dict is not None:
+        stats_dict["dense_count"] = total_dense
+        stats_dict["bm25_count"] = total_bm25
+        stats_dict["fused_count"] = len(fused)
 
     # 5. Cross-Encoder Reranking
     if cfg["features"].get("use_reranking") and _RANKER:

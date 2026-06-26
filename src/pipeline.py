@@ -1,9 +1,9 @@
 from pathlib import Path
+from operator import itemgetter
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
 
 from src.retrieval import hybrid_retrieve, classify_domain, generate_query_variants
 from src.security.sanitizer import sanitize_input, filter_output_pii
@@ -55,9 +55,9 @@ def build_rag_chain(cfg):
 
     chain = (
         {
-            "context": RunnablePassthrough(),
-            "history": RunnablePassthrough(),
-            "question": RunnablePassthrough(),
+            "context": itemgetter("context"),
+            "history": itemgetter("history"),
+            "question": itemgetter("question"),
         }
         | prompt
         | llm
@@ -69,13 +69,16 @@ def build_rag_chain(cfg):
 
 def check_confidence(docs, cfg):
     """Return False if top chunk score is below confidence threshold."""
-    if not cfg["features"]["use_confidence_gating"]:
+    if not cfg["features"].get("use_confidence_gating", False):
         return True
     if not docs:
         return False
     # Check relevance score from metadata if available
     top_score = docs[0].metadata.get("relevance_score", 1.0)
-    return top_score >= cfg["retrieval"]["confidence_threshold"]
+    if cfg["features"].get("use_reranking", True):
+        return top_score >= cfg["retrieval"]["confidence_threshold"]
+    else:
+        return top_score >= cfg["retrieval"].get("rrf_confidence_threshold", 0.01)
 
 
 def run_self_check(question, answer, context, llm):
@@ -95,83 +98,23 @@ def run_self_check(question, answer, context, llm):
     return answer
 
 
-def query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
+def _pipeline_core(question, vectorstore, bm25_index, bm25_chunks,
                    rag_chain, llm, cfg, memory=None):
-    """Full pipeline: sanitize → retrieve → gate → generate → check → filter."""
+    """Core pipeline generator. Single source of truth for all pipeline logic."""
     # 1. Sanitize input
-    if cfg["features"]["use_security"]:
-        question, _ = sanitize_input(question)
-
-    # 2. Retrieve
-    docs = hybrid_retrieve(question, vectorstore, bm25_index, bm25_chunks, cfg, llm=llm)
-
-    # 3. Confidence gate
-    if not check_confidence(docs, cfg):
-        return {
-            "answer": "I don't have enough confident information to answer this question.",
-            "sources": [],
-            "docs": docs,
-        }
-
-    # 4. Format context
-    context = format_docs(docs)
-
-    # 5. Get history
-    history = ""
-    if memory:
-        history = memory.format_for_prompt()
-
-    # 6. Generate answer
-    answer = rag_chain.invoke({
-        "context": context,
-        "history": history,
-        "question": question,
-    })
-
-    # 7. Self-check
-    if cfg["features"]["use_self_check"]:
-        answer = run_self_check(question, answer, context, llm)
-
-    # 8. PII filter
-    if cfg["features"]["use_security"]:
-        answer = filter_output_pii(answer)
-
-    # 9. Update memory
-    if memory:
-        memory.add_turn("user", question)
-        memory.add_turn("assistant", answer)
-
-    # 10. Build result
-    sources = []
-    for i, doc in enumerate(docs, 1):
-        source_name = Path(doc.metadata.get("source", "unknown")).name
-        score = doc.metadata.get("relevance_score", "N/A")
-        sources.append({"index": i, "source": source_name, "score": score})
-
-    return {
-        "answer": answer,
-        "sources": sources,
-        "docs": docs,
-    }
-
-
-def stream_query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
-                          rag_chain, llm, cfg, memory=None):
-    """Streaming version of query_pipeline. Yields tokens and stage events."""
-    # 1. Sanitize input
-    if cfg["features"]["use_security"]:
+    if cfg["features"].get("use_security", False):
         yield {"type": "stage", "name": "Sanitizing input", "status": "running"}
         question, blocked_matches = sanitize_input(question)
         if blocked_matches:
             blocked_str = ", ".join(f"'{m}'" for m in blocked_matches)
             yield {"type": "stage", "name": "Sanitizing input", "status": "done", "details": f"Blocked: {blocked_str}"}
         else:
-            yield {"type": "stage", "name": "Sanitizing input", "status": "done"}
+            yield {"type": "stage", "name": "Sanitizing input", "status": "done", "details": "Clean"}
 
     # 2. Query routing
     domain_filter = None
     is_greeting = False
-    if cfg["features"]["use_query_routing"] and llm:
+    if cfg["features"].get("use_query_routing", False) and llm:
         yield {"type": "stage", "name": "Classifying query domain", "status": "running"}
         domain = classify_domain(question, llm, cfg)
         if domain == "greeting":
@@ -183,7 +126,7 @@ def stream_query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
         else:
             yield {"type": "stage", "name": "Classifying query domain", "status": "done", "details": "All domains"}
 
-    # FAST PATH: Greeting
+    # 3. GREETING FAST PATH
     if is_greeting:
         yield {"type": "stage", "name": "Generating answer", "status": "running"}
         full_answer = ""
@@ -203,72 +146,100 @@ def stream_query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
         yield {"type": "final", "answer": full_answer, "sources": [], "docs": []}
         return
 
-    # 3. Generate query variants
+    # 4. Multi-query expansion
     queries = None
-    if cfg["features"]["use_multi_query"] and llm:
+    if cfg["features"].get("use_multi_query", False) and llm:
         yield {"type": "stage", "name": "Generating multi-queries", "status": "running"}
         queries = generate_query_variants(question, llm, n=cfg["multi_query"]["num_variants"])
-        yield {"type": "stage", "name": "Generating multi-queries", "status": "done", "details": f"{len(queries)} queries"}
+        yield {"type": "stage", "name": "Generating multi-queries", "status": "done", "details": f"Variants: {', '.join(queries[1:])}"}
 
-    # 4. Retrieve
+    # 5. Hybrid retrieval
     yield {"type": "stage", "name": "Retrieving documents", "status": "running"}
+    stats = {}
     docs = hybrid_retrieve(
         question, vectorstore, bm25_index, bm25_chunks, cfg, 
-        llm=llm, domain_filter=domain_filter, queries=queries
+        domain_filter=domain_filter, queries=queries, stats_dict=stats
     )
-    yield {"type": "stage", "name": "Retrieving documents", "status": "done", "details": f"Found {len(docs)} docs"}
+    
+    retrieval_details = f"Dense: {stats.get('dense_count', 0)}, BM25: {stats.get('bm25_count', 0)} -> Fused: {stats.get('fused_count', 0)} -> Final: {len(docs)}"
+    yield {"type": "stage", "name": "Retrieving documents", "status": "done", "details": retrieval_details}
 
-    # 3. Confidence gate
+    # 6. Confidence gate
     yield {"type": "stage", "name": "Checking confidence", "status": "running"}
     if not check_confidence(docs, cfg):
         yield {"type": "stage", "name": "Checking confidence", "status": "failed", "details": "Low confidence"}
+        refusal_answer = "I don't have enough confident information to answer this question."
+        if memory:
+            memory.add_turn("user", question)
+            memory.add_turn("assistant", refusal_answer)
         yield {
             "type": "refusal",
-            "answer": "I don't have enough confident information to answer this question.",
+            "answer": refusal_answer,
             "sources": [],
             "docs": docs,
         }
         return
     yield {"type": "stage", "name": "Checking confidence", "status": "done", "details": "Passed"}
 
-    # 4. Format context
+    # 7. Format context
     context = format_docs(docs)
 
-    # 5. Get history
+    # 8. Get conversation history
     history = ""
     if memory:
         history = memory.format_for_prompt()
 
-    # 6. Stream answer tokens
+    # 9. Stream answer tokens (or batch generate if security is on)
     yield {"type": "stage", "name": "Generating answer", "status": "running"}
     full_answer = ""
-    for chunk in rag_chain.stream({
-        "context": context,
-        "history": history,
-        "question": question,
-    }):
-        full_answer += chunk
-        yield {"type": "token", "content": chunk}
-    yield {"type": "stage", "name": "Generating answer", "status": "done"}
-
-    # 7. Self-check on complete answer
-    if cfg["features"]["use_self_check"]:
-        yield {"type": "stage", "name": "Running self-check", "status": "running"}
-        full_answer = run_self_check(question, full_answer, context, llm)
-        yield {"type": "stage", "name": "Running self-check", "status": "done"}
-
-    # 8. PII filter
-    if cfg["features"]["use_security"]:
+    
+    use_security = cfg["features"].get("use_security", False)
+    
+    if use_security:
+        # Buffer entire answer to apply PII filter before showing to user
+        full_answer = rag_chain.invoke({
+            "context": context,
+            "history": history,
+            "question": question,
+        })
+        
+        # 10. Self-check
+        if cfg["features"].get("use_self_check", False):
+            yield {"type": "stage", "name": "Running self-check", "status": "running"}
+            full_answer = run_self_check(question, full_answer, context, llm)
+            yield {"type": "stage", "name": "Running self-check", "status": "done"}
+            
+        # 11. PII filter
         yield {"type": "stage", "name": "Filtering PII", "status": "running"}
         full_answer = filter_output_pii(full_answer)
         yield {"type": "stage", "name": "Filtering PII", "status": "done"}
+        
+        # Yield as a single chunk to the UI
+        yield {"type": "token", "content": full_answer}
+        yield {"type": "stage", "name": "Generating answer", "status": "done"}
+        
+    else:
+        for chunk in rag_chain.stream({
+            "context": context,
+            "history": history,
+            "question": question,
+        }):
+            full_answer += chunk
+            yield {"type": "token", "content": chunk}
+        yield {"type": "stage", "name": "Generating answer", "status": "done"}
 
-    # 9. Update memory
+        # 10. Self-check
+        if cfg["features"].get("use_self_check", False):
+            yield {"type": "stage", "name": "Running self-check", "status": "running"}
+            full_answer = run_self_check(question, full_answer, context, llm)
+            yield {"type": "stage", "name": "Running self-check", "status": "done"}
+
+    # 12. Update memory
     if memory:
         memory.add_turn("user", question)
         memory.add_turn("assistant", full_answer)
 
-    # 10. Yield final result with sources
+    # 13. Build final result with sources
     sources = []
     for i, doc in enumerate(docs, 1):
         source_name = Path(doc.metadata.get("source", "unknown")).name
@@ -282,4 +253,34 @@ def stream_query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
         "answer": full_answer,
         "sources": sources,
         "docs": docs,
+    }
+
+
+def stream_query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
+                          rag_chain, llm, cfg, memory=None):
+    """Streaming version of the pipeline. Yields events from the core generator."""
+    yield from _pipeline_core(
+        question, vectorstore, bm25_index, bm25_chunks,
+        rag_chain, llm, cfg, memory=memory
+    )
+
+
+def query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
+                   rag_chain, llm, cfg, memory=None):
+    """Sync interface — runs the full pipeline and returns the final result dict."""
+    result = None
+    for event in _pipeline_core(
+        question, vectorstore, bm25_index, bm25_chunks,
+        rag_chain, llm, cfg, memory=memory
+    ):
+        if event["type"] in ("final", "refusal"):
+            result = event
+            
+    if result is None:
+        return {"answer": "Pipeline produced no result.", "sources": [], "docs": []}
+        
+    return {
+        "answer": result["answer"],
+        "sources": result.get("sources", []),
+        "docs": result.get("docs", []),
     }

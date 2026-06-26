@@ -11,4 +11,4 @@ python-dotenv
 ragas
 datasets
 pandas
-flashrank
+streamlit

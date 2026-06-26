@@ -6,8 +6,8 @@ services:
       - faiss_data:/app/faiss_index
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-    stdin_open: true
-    tty: true
+    ports:
+      - "8501:8501"
 
 volumes:
   faiss_data:

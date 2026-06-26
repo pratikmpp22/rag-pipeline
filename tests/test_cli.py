@@ -15,9 +15,9 @@ def test_plain_text_is_not_command():
 
 def test_quit_raises_system_exit():
     from src.cli import handle_command
-    from src.memory import ConversationMemory
+    from src.memory import HybridMemory
 
-    memory = ConversationMemory(max_turns=5)
+    memory = HybridMemory(token_budget=5)
     state = {
         "vectorstore": None,
         "bm25_index": None,

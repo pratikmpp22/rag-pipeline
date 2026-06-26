@@ -40,7 +40,7 @@ def load_documents(data_dir):
     # Assign domain metadata based on filename
     for doc in docs:
         stem = Path(doc.metadata.get("source", "")).stem
-        doc.metadata["domain"] = DOMAIN_MAP.get(stem, "general")
+        doc.metadata["domain"] = DOMAIN_MAP.get(stem, "none")
 
     return docs
 

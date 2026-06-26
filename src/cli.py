@@ -4,7 +4,7 @@ from src.config import get_config
 from src.ingestion import setup_pipeline_data
 from src.retrieval import build_bm25_index
 from src.pipeline import build_llm, build_rag_chain, stream_query_pipeline
-from src.memory import ConversationMemory
+from src.memory import HybridMemory
 from src.evaluate import run_evaluation
 from src.ab_comparison import run_ab_comparison
 
@@ -117,6 +117,9 @@ def customize_features(cfg):
 
 def main():
     """Entry point for the RAG Expert Assistant CLI."""
+    from dotenv import load_dotenv
+    load_dotenv()
+    
     cfg = get_config()
 
     print(BANNER)
@@ -139,7 +142,10 @@ def main():
     rag_chain = build_rag_chain(cfg)
 
     # Initialize memory
-    memory = ConversationMemory(cfg["memory"]["max_turns"])
+    memory = HybridMemory(
+        token_budget=cfg["memory"]["token_budget"],
+        summary_llm=llm
+    )
 
     # Print status
     print_feature_status(cfg)
