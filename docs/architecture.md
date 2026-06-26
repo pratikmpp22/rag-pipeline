@@ -37,6 +37,7 @@ Documents (TXT / MD)
 | Streamlit UI  |  | Terminal UI |
 | (app.py)      |  | (cli.py)    |
 +---------------+  +-------------+
+```
 
 ## Request path (runtime)
 
@@ -171,10 +172,25 @@ When `features.use_self_check` is true in `configs/base.yaml`, after the main an
 
 ### 6. Evaluate
 
-The RAGAS framework evaluates pipeline quality across four metrics. An A/B comparison framework measures naive vs optimized settings.
+Two separate evaluation systems exist, serving different purposes:
 
-- **Entry points**: `src/evaluate.py`, `src/ab_comparison.py`
+#### 6a. RAGAS Evaluation (`src/evaluate.py`)
+
+Runs the full pipeline for each test question in `configs/base.yaml`, then feeds the answers, retrieved contexts, and ground truths into the RAGAS framework for LLM-based scoring.
+
+- **Entry point**: `src/evaluate.py :: run_evaluation()` or `python -m src.evaluate`
 - **Metrics**: Faithfulness, Answer Relevancy, Context Precision, Context Recall
+- **Scoring**: LLM-judged (uses the same Gemini model wrapped for RAGAS)
+- **Thresholds**: Configurable via `evaluation.pass_threshold` (0.80) and `evaluation.needs_work_threshold` (0.70)
+
+#### 6b. A/B Comparison (`src/ab_comparison.py`)
+
+Builds two complete pipelines (Naive vs Optimized) with different chunking, retrieval, and feature settings, then runs both against the same test questions. Uses a fast **token-overlap** heuristic (intersection of answer tokens with ground truth tokens) instead of expensive RAGAS metrics, making it suitable for rapid iteration.
+
+- **Entry point**: `src/ab_comparison.py :: run_ab_comparison()` or `python -m src.ab_comparison`
+- **Metrics**: Avg Token Overlap (answer quality), Candidate Pool Size, Final Chunks to LLM, Avg Latency, and Avg Tokens to LLM.
+- **Naive config**: 1000-char chunks, no overlap, top-20, no reranking/hybrid
+- **Optimized config**: 512-char chunks, 50 overlap, top-20, full hybrid+reranking+routing+multi-query
 
 ## Security layer
 

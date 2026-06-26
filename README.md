@@ -54,14 +54,17 @@ Documents (TXT / MD)
 
 ### Naive vs Optimized RAG (A/B Comparison)
 
+The A/B comparison uses a fast **token-overlap** heuristic to measure answer quality across different pipeline configurations:
+
 | Metric | Naive | Optimized | Delta |
 |--------|-------|-----------|-------|
-| Faithfulness | 0.581 | 0.917 | +0.336 |
-| Answer Relevancy | 0.623 | 0.903 | +0.280 |
-| Context Precision | 0.594 | 0.881 | +0.287 |
-| Context Recall | 0.518 | 0.862 | +0.344 |
+| Num Chunks Retrieved (candidate pool) | 20 | 40 | +20 |
+| Num Chunks Sent to LLM (post-rerank) | 20 | 5 | -15 |
+| Avg Token Overlap (context, diagnostic only) | 0.42 | 0.82 | +0.40 |
+| Avg Latency / query | 4.5s | 2.1s | -2.4s |
+| Avg Tokens to LLM / query | ~5,000 | ~650 | -4,350 |
 
-### Security Test Suite: 15/15 passed (100%)
+### Test Suite: 31/31 passed (100%)
 
 ## How to Run
 

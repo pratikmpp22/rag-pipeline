@@ -269,18 +269,29 @@ def query_pipeline(question, vectorstore, bm25_index, bm25_chunks,
                    rag_chain, llm, cfg, memory=None):
     """Sync interface — runs the full pipeline and returns the final result dict."""
     result = None
+    telemetry = {"fused_count": 0}
+    
     for event in _pipeline_core(
         question, vectorstore, bm25_index, bm25_chunks,
         rag_chain, llm, cfg, memory=memory
     ):
+        if event["type"] == "stage" and event["name"] == "Retrieving documents" and event["status"] == "done":
+            details = event.get("details", "")
+            if "Fused:" in details:
+                import re
+                m = re.search(r"Fused:\s*(\d+)", details)
+                if m:
+                    telemetry["fused_count"] = int(m.group(1))
+                    
         if event["type"] in ("final", "refusal"):
             result = event
             
     if result is None:
-        return {"answer": "Pipeline produced no result.", "sources": [], "docs": []}
+        return {"answer": "Pipeline produced no result.", "sources": [], "docs": [], "telemetry": telemetry}
         
     return {
         "answer": result["answer"],
         "sources": result.get("sources", []),
         "docs": result.get("docs", []),
+        "telemetry": telemetry,
     }

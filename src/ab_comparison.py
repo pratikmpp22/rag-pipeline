@@ -1,7 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 
 from src.ingestion import load_documents, chunk_documents
@@ -26,7 +25,7 @@ naive_config = RAGConfig(
     name="Naive RAG",
     chunk_size=1000,
     chunk_overlap=0,
-    retriever_k=3,
+    retriever_k=20,
     use_reranking=False,
     use_hybrid_search=False,
 )
@@ -106,12 +105,20 @@ def _token_overlap_score(answer, ground_truth):
     return len(answer_tokens & truth_tokens) / len(truth_tokens)
 
 
+import time
+
 def evaluate_rag(config, test_questions, ground_truths, cfg):
-    """Run pipeline for each question, compute token-overlap scores."""
+    """Run pipeline for each question, compute multiple metrics."""
     pipeline = _build_pipeline(config, cfg)
 
-    scores = []
+    overlaps = []
+    latencies = []
+    retrieved_counts = []
+    sent_counts = []
+    llm_tokens = []
+
     for q, gt in zip(test_questions, ground_truths):
+        start_time = time.time()
         result = query_pipeline(
             q,
             pipeline["vectorstore"],
@@ -121,15 +128,36 @@ def evaluate_rag(config, test_questions, ground_truths, cfg):
             pipeline["llm"],
             pipeline["cfg"],
         )
+        end_time = time.time()
+        
         score = _token_overlap_score(result["answer"], gt)
-        scores.append(score)
+        overlaps.append(score)
+        latencies.append(end_time - start_time)
+        
+        # Candidate pool size (fused count or top_k fallback)
+        pool_size = result.get("telemetry", {}).get("fused_count")
+        if not pool_size:
+            pool_size = config.retriever_k
+        retrieved_counts.append(pool_size)
+        
+        # Final chunks passed to LLM
+        sent_counts.append(len(result["docs"]))
+        
+        # Estimate context tokens passed to LLM (4 chars per token roughly)
+        token_count = sum(len(doc.page_content) // 4 for doc in result["docs"])
+        llm_tokens.append(token_count)
 
-    avg_score = sum(scores) / len(scores) if scores else 0.0
+    def avg(lst):
+        return sum(lst) / len(lst) if lst else 0.0
+
     return {
         "config_name": config.name,
-        "avg_score": avg_score,
-        "per_question": scores,
-        "num_chunks": len(pipeline["chunks"]),
+        "avg_overlap": avg(overlaps),
+        "avg_latency": avg(latencies),
+        "avg_retrieved": avg(retrieved_counts),
+        "avg_sent": avg(sent_counts),
+        "avg_tokens": avg(llm_tokens),
+        "per_question_overlap": overlaps,
     }
 
 
@@ -148,40 +176,60 @@ def run_ab_comparison(cfg):
     opt_scores = evaluate_rag(optimized_config, questions, ground_truths, cfg)
 
     # Print comparison table
-    print("\n" + "=" * 60)
-    print(f"  {'Metric':<25} {'Naive':>10} {'Optimized':>10} {'Delta':>10}")
-    print("-" * 60)
+    print("\n" + "=" * 90)
+    print(f"  {'Metric':<45} {'Naive':>10} {'Optimized':>10} {'Delta':>10}")
+    print("-" * 90)
 
-    delta = opt_scores["avg_score"] - naive_scores["avg_score"]
-    print(f"  {'Avg Token Overlap':<25} {naive_scores['avg_score']:>10.4f} {opt_scores['avg_score']:>10.4f} {delta:>+10.4f}")
-    print(f"  {'Num Chunks':<25} {naive_scores['num_chunks']:>10} {opt_scores['num_chunks']:>10}")
+    def print_row(name, val_n, val_o, is_float=False, is_time=False, is_approx=False):
+        d = val_o - val_n
+        if is_float:
+            fmt_n, fmt_o, fmt_d = f"{val_n:.2f}", f"{val_o:.2f}", f"{d:+.2f}"
+        elif is_time:
+            fmt_n, fmt_o, fmt_d = f"{val_n:.1f}s", f"{val_o:.1f}s", f"{d:+.1f}s"
+        else:
+            fmt_n, fmt_o = f"{int(val_n)}", f"{int(val_o)}"
+            fmt_d = f"{int(d):+d}"
+            if is_approx:
+                fmt_n = f"~{fmt_n}"
+                fmt_o = f"~{fmt_o}"
+        
+        print(f"  {name:<45} {fmt_n:>10} {fmt_o:>10} {fmt_d:>10}")
+
+    print_row("Num Chunks Retrieved (candidate pool)", naive_scores["avg_retrieved"], opt_scores["avg_retrieved"])
+    print_row("Num Chunks Sent to LLM (post-rerank)", naive_scores["avg_sent"], opt_scores["avg_sent"])
+    print_row("Avg Token Overlap (context, diagnostic only)", naive_scores["avg_overlap"], opt_scores["avg_overlap"], is_float=True)
+    print_row("Avg Latency / query", naive_scores["avg_latency"], opt_scores["avg_latency"], is_time=True)
+    print_row("Avg Tokens to LLM / query", naive_scores["avg_tokens"], opt_scores["avg_tokens"], is_approx=True)
 
     # Per-question comparison
-    print("\n[*] Per-Question Scores:")
-    print("-" * 60)
+    print("\n[*] Per-Question Scores (Overlap):")
+    print("-" * 90)
     for i, q in enumerate(questions):
-        n_score = naive_scores["per_question"][i]
-        o_score = opt_scores["per_question"][i]
+        n_score = naive_scores["per_question_overlap"][i]
+        o_score = opt_scores["per_question_overlap"][i]
         d = o_score - n_score
         marker = "[+]" if d > 0 else ("[=]" if d == 0 else "[-]")
         print(f"  Q{i+1}: {n_score:.3f} -> {o_score:.3f} ({d:+.3f}) {marker}")
-        print(f"      {q[:60]}")
+        print(f"      {q[:80]}")
 
     # Summary
-    print("\n" + "=" * 60)
+    delta = opt_scores["avg_overlap"] - naive_scores["avg_overlap"]
+    print("\n" + "=" * 90)
     if delta > 0.05:
         print("  [PASS] PRODUCTION READY -- Optimized config shows clear improvement")
     elif delta > 0:
         print("  [WARN] MARGINAL -- Small improvement, consider further tuning")
     else:
         print("  [FAIL] NEEDS WORK -- Optimized config not outperforming naive")
-    print("=" * 60 + "\n")
+    print("=" * 90 + "\n")
 
     return naive_scores, opt_scores
 
 if __name__ == "__main__":
     from src.config import get_config
+    from dotenv import load_dotenv
     
+    load_dotenv()
     cfg = get_config()
     print("Running A/B Comparison standalone...", flush=True)
     run_ab_comparison(cfg)
